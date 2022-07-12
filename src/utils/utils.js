@@ -6,7 +6,7 @@ import { MUNICIPALITY_CITIES_ARR, NEED_FIX_MAP, RUN_TITLES } from './const';
 
 const titleForShow = (run) => {
   const date = run.start_date_local.slice(0, 11);
-  const distance = (run.distance / 1000.0).toFixed(1);
+  const distance = (run.distance / 1000.0).toFixed(2);
   let name = 'Run';
   if (run.name.slice(0, 7) === 'Running') {
     name = 'run';
@@ -33,11 +33,13 @@ const formatRunTime = (distance,pace) => {
   }
   const formatPace = (1000.0 / 60.0) * (1.0 / pace);
   const minutes = Math.floor(formatPace * distance);
-  if (minutes === 0) {
-    const seconds = Math.floor((formatPace * distance - minutes) * 60.0);
-    return seconds + 's';
-  }
-  return minutes + 'min';
+//  if (minutes === 0) {
+//    const seconds = Math.floor((formatPace * distance - minutes) * 60.0);
+//    return seconds + 's';
+//  }
+//  return minutes + 'min';
+  const seconds = Math.floor((formatPace * distance - minutes) * 60.0).toString().padStart(2, '0');
+  return minutes + 'min' + seconds + 's';
 };
 
 // for scroll to the map
@@ -132,13 +134,13 @@ const titleForRun = (run) => {
   if (runHour >= 0 && runHour <= 10) {
     return RUN_TITLES.MORNING_RUN_TITLE;
   }
-  if (runHour > 10 && runHour <= 14) {
+  if (runHour > 10 && runHour <= 13) {
     return RUN_TITLES.MIDDAY_RUN_TITLE;
   }
-  if (runHour > 14 && runHour <= 18) {
+  if (runHour > 13 && runHour <= 16) {
     return RUN_TITLES.AFTERNOON_RUN_TITLE;
   }
-  if (runHour > 18 && runHour <= 21) {
+  if (runHour > 16 && runHour <= 18) {
     return RUN_TITLES.EVENING_RUN_TITLE;
   }
   return RUN_TITLES.NIGHT_RUN_TITLE;
