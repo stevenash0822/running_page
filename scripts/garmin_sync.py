@@ -16,17 +16,14 @@ import traceback
 import aiofiles
 import cloudscraper
 import httpx
-from config import GPX_FOLDER, JSON_FILE, SQL_FILE, TCX_FOLDER, config
+from config import JSON_FILE, SQL_FILE, FOLDER_DICT, config
+from io import BytesIO
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from utils import make_activities_file
 
 # logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-FOLDER_DICT = {
-    "gpx": GPX_FOLDER,
-    "tcx": TCX_FOLDER,
-}
 
 TIME_OUT = httpx.Timeout(240.0, connect=360.0)
 GARMIN_COM_URL_DICT = {
@@ -73,12 +70,14 @@ class Garmin:
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36",
             "origin": self.URL_DICT.get("SSO_URL_ORIGIN"),
+            "nk": "NT",
         }
         self.is_only_running = is_only_running
         self.upload_url = self.URL_DICT.get("UPLOAD_URL")
         self.activity_url = self.URL_DICT.get("ACTIVITY_URL")
         self.is_login = False
 
+    @retry(stop=stop_after_attempt(5), wait=wait_fixed(30))
     def login(self):
         """
         Login to portal
@@ -219,6 +218,35 @@ class Garmin:
                 r.raise_for_status()
         await self.req.aclose()
 
+    async def upload_activities_original(self, datas):
+        print("start upload activities to garmin!!!")
+        if not self.is_login:
+            self.login()
+        for data in datas:
+            print(data.filename)
+            with open(data.filename, "wb") as f:
+                for chunk in data.content:
+                    f.write(chunk)
+            f = open(data.filename, "rb")
+            files = {"data": (data.filename, BytesIO(f.read()))}
+
+            try:
+                res = await self.req.post(
+                    self.upload_url, files=files, headers={"nk": "NT"}
+                )
+                os.remove(data.filename)
+                f.close()
+            except Exception as e:
+                print(str(e))
+                # just pass for now
+                continue
+            try:
+                resp = res.json()["detailedImportResult"]
+                print("garmin upload success: ", resp)
+            except Exception as e:
+                print("garmin upload failed: ", e)
+        await self.req.aclose()
+
 
 class GarminConnectHttpError(Exception):
     def __init__(self, status):
@@ -285,6 +313,35 @@ async def gather_with_concurrency(n, tasks):
     return await asyncio.gather(*(sem_task(task) for task in tasks))
 
 
+def get_downloaded_ids(folder):
+    return [i.split(".")[0] for i in os.listdir(folder) if not i.startswith(".")]
+
+
+async def download_new_activities(
+    email, password, auth_domain, downloaded_ids, is_only_running, folder, file_type
+):
+    client = Garmin(email, password, auth_domain, is_only_running)
+    client.login()
+    # because I don't find a para for after time, so I use garmin-id as filename
+    # to find new run to generage
+    activity_ids = await get_activity_id_list(client)
+    to_generate_garmin_ids = list(set(activity_ids) - set(downloaded_ids))
+    print(f"{len(to_generate_garmin_ids)} new activities to be downloaded")
+
+    start_time = time.time()
+    await gather_with_concurrency(
+        10,
+        [
+            download_garmin_data(client, id, file_type=file_type)
+            for id in to_generate_garmin_ids
+        ],
+    )
+    print(f"Download finished. Elapsed {time.time()-start_time} seconds")
+
+    await client.req.aclose()
+    return to_generate_garmin_ids
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("email", nargs="?", help="email of garmin")
@@ -315,44 +372,28 @@ if __name__ == "__main__":
     auth_domain = (
         "CN" if options.is_cn else config("sync", "garmin", "authentication_domain")
     )
+    file_type = options.download_file_type
     is_only_running = options.only_run
     if email == None or password == None:
         print("Missing argument nor valid configuration file")
         sys.exit(1)
-    folder = FOLDER_DICT.get(options.download_file_type, "gpx")
-    # make gpx dir
+    folder = FOLDER_DICT.get(file_type, "gpx")
+    # make gpx or tcx dir
     if not os.path.exists(folder):
         os.mkdir(folder)
-
-    async def download_new_activities():
-        client = Garmin(email, password, auth_domain, is_only_running)
-        client.login()
-
-        # because I don't find a para for after time, so I use garmin-id as filename
-        # to find new run to generage
-        downloaded_ids = [
-            i.split(".")[0] for i in os.listdir(folder) if not i.startswith(".")
-        ]
-        activity_ids = await get_activity_id_list(client)
-        to_generate_garmin_ids = list(set(activity_ids) - set(downloaded_ids))
-        print(f"{len(to_generate_garmin_ids)} new activities to be downloaded")
-
-        start_time = time.time()
-        file_type = options.download_file_type
-        await gather_with_concurrency(
-            10,
-            [
-                download_garmin_data(client, id, file_type=file_type)
-                for id in to_generate_garmin_ids
-            ],
-        )
-        print(f"Download finished. Elapsed {time.time()-start_time} seconds")
-
-        make_activities_file(
-            SQL_FILE, folder, JSON_FILE, file_suffix=options.download_file_type
-        )
-        await client.req.aclose()
+    downloaded_ids = get_downloaded_ids(folder)
 
     loop = asyncio.get_event_loop()
-    future = asyncio.ensure_future(download_new_activities())
+    future = asyncio.ensure_future(
+        download_new_activities(
+            email,
+            password,
+            auth_domain,
+            downloaded_ids,
+            is_only_running,
+            folder,
+            file_type,
+        )
+    )
     loop.run_until_complete(future)
+    make_activities_file(SQL_FILE, folder, JSON_FILE, file_suffix=file_type)
