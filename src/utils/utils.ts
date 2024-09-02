@@ -67,9 +67,9 @@ const formatRunTime = (moving_time: string): string => {
   const seconds = totalSeconds % 60;
   const minutes = (totalSeconds - seconds) / 60;
   if (minutes === 0) {
-    return seconds + 's';
+    return minutes + 'min' + seconds + 's';
   }
-  return minutes + 'min';
+  return minutes + 'min' + seconds + 's';
 };
 
 // for scroll to the map
@@ -199,13 +199,13 @@ const titleForRun = (run: Activity): string => {
   if (runHour >= 0 && runHour <= 10) {
     return RUN_TITLES.MORNING_RUN_TITLE;
   }
-  if (runHour > 10 && runHour <= 14) {
+  if (runHour > 10 && runHour <= 13) {
     return RUN_TITLES.MIDDAY_RUN_TITLE;
   }
-  if (runHour > 14 && runHour <= 18) {
+  if (runHour > 13 && runHour <= 16) {
     return RUN_TITLES.AFTERNOON_RUN_TITLE;
   }
-  if (runHour > 18 && runHour <= 21) {
+  if (runHour > 16 && runHour <= 18) {
     return RUN_TITLES.EVENING_RUN_TITLE;
   }
   return RUN_TITLES.NIGHT_RUN_TITLE;
